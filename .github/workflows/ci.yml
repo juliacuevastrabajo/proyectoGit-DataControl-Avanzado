@@ -6,8 +6,6 @@ on:
     branches: [develop]
   push:
     branches: [develop]
-    paths-ignore:
-      - README.md
   workflow_dispatch: {}
 
 permissions:
@@ -20,18 +18,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          token: ${{ github.event_name == 'push' && secrets.OWNER_TOKEN || github.token }}
+          ref: ${{ github.head_ref || github.ref_name }}
+          token: ${{ secrets.OWNER_TOKEN }}
 
       - name: Registrar la rama en el README
-        if: ${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Merge pull request') }}
         env:
-          FALLBACK_BRANCH: ${{ github.head_ref || github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET_BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          SUBJECT=$(git log -1 --pretty=%s)
-          BRANCH=$(printf '%s\n' "$SUBJECT" | sed -E 's|^Merge pull request #[0-9]+ from [^/]+/||')
-          if [ -z "$BRANCH" ] || [ "$BRANCH" = "$SUBJECT" ]; then
-            BRANCH=$FALLBACK_BRANCH
+          if [ -z "$TARGET_BRANCH" ]; then
+            echo "No se pudo determinar la rama de destino" >&2
+            exit 1
+          fi
+          BRANCH=$TARGET_BRANCH
+          if [ "$EVENT_NAME" = "push" ]; then
+            SUBJECT=$(git log -1 --pretty=%s)
+            MERGED_BRANCH=$(printf '%s\n' "$SUBJECT" | sed -nE 's|^Merge pull request #[0-9]+ from [^/]+/(.+)$|\1|p')
+            BRANCH=${MERGED_BRANCH:-$TARGET_BRANCH}
           fi
           LINE="- Añadida feature: $BRANCH"
           touch README.md
@@ -42,17 +45,22 @@ jobs:
           fi
 
       - name: Commit y push del README
-        if: ${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Merge pull request') }}
+        env:
+          TARGET_BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           if git diff --quiet -- README.md; then
             echo "Sin cambios que commitear"
             exit 0
           fi
+          if [ -z "$TARGET_BRANCH" ]; then
+            echo "No se pudo determinar la rama de destino" >&2
+            exit 1
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add README.md
           git commit -m "docs: registrar rama"
-          git push origin HEAD:develop
+          git push origin "HEAD:$TARGET_BRANCH"
 
   validate-dev:
     needs: update-readme
