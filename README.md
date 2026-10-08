@@ -3,3 +3,4 @@ AppVersion-0
 - Añadida feature: feature/ci-token-distinto
 - Añadida feature: develop
 - Añadida feature: feature/ci-eventos
+- Añadida feature: feature/ci-eventos-fallo
