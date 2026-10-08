@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [develop]
+  push:
+    branches: [develop]
+    paths-ignore:
+      - README.md
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          token: ${{ github.event_name == 'push' && secrets.OWNER_TOKEN || github.token }}
+
+      - name: Registrar la rama en el README
+        if: ${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Merge pull request') }}
+        env:
+          MERGE_MESSAGE: ${{ github.event.head_commit.message }}
+          FALLBACK_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          BRANCH=$(printf '%s\n' "$MERGE_MESSAGE" | sed -nE 's#^Merge pull request #[0-9]+ from [^/]+/(.+)$#\1#p' | head -n 1)
+          BRANCH=${BRANCH:-$FALLBACK_BRANCH}
+          LINE="- Añadida feature: $BRANCH"
+          touch README.md
+          if grep -Fxq -- "$LINE" README.md; then
+            echo "La rama ya estaba registrada"
+          else
+            printf '%s\n' "$LINE" >> README.md
+          fi
+
+      - name: Commit y push del README
+        if: ${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Merge pull request') }}
+        run: |
+          if git diff --quiet -- README.md; then
+            echo "Sin cambios que commitear"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "docs: registrar rama"
+          git push origin HEAD:develop
+
+  validate-dev:
+    needs: update-readme
+    runs-on: [self-hosted, Windows, X64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validar entorno de desarrollo
+        env:
+          TOKEN: ${{ secrets.DEV_TOKEN }}
+        shell: powershell
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TOKEN)) {
+            Write-Error "DEV_TOKEN no existe o está vacío."
+            exit 1
+          }
+          if ([string]::IsNullOrWhiteSpace($env:LOCAL_DEV_TOKEN)) {
+            Write-Error "LOCAL_DEV_TOKEN no existe o está vacío."
+            exit 1
+          }
+          if ($env:TOKEN -ceq $env:LOCAL_DEV_TOKEN) {
+            Write-Host "CI: validación de desarrollo correcta ✅"
+          } else {
+            Write-Host "CI: validación fallida ❌"
+            Write-Error "DEV_TOKEN y LOCAL_DEV_TOKEN no coinciden."
+            exit 1
+          }

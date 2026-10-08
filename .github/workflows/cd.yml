@@ -1,0 +1,72 @@
+name: CD
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+  push:
+    branches: [main]
+    paths-ignore:
+      - README.md
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  bump-version:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Merge pull request')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+          token: ${{ secrets.OWNER_TOKEN }}
+
+      - name: Incrementar versión en el README
+        run: |
+          LAST=$(grep -oP 'AppVersion-\K[0-9]+' README.md | tail -1)
+          LAST=${LAST:-0}
+          NEXT=$((LAST + 1))
+          FECHA=$(date '+%d/%m/%Y %H:%M')
+          printf '%s\n' "- AppVersion-$NEXT - $FECHA" >> README.md
+
+      - name: Commit y push del README
+        run: |
+          if git diff --quiet -- README.md; then
+            echo "Sin cambios que commitear"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "docs: bump de versión"
+          git push origin HEAD:main
+
+  validate-prod:
+    needs: bump-version
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Merge pull request')) }}
+    runs-on: [self-hosted, Windows, X64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validar entorno de producción
+        env:
+          TOKEN: ${{ secrets.PROD_TOKEN }}
+        shell: powershell
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TOKEN)) {
+            Write-Error "PROD_TOKEN no existe o está vacío."
+            exit 1
+          }
+          if ([string]::IsNullOrWhiteSpace($env:LOCAL_PROD_TOKEN)) {
+            Write-Error "LOCAL_PROD_TOKEN no existe o está vacío."
+            exit 1
+          }
+          if ($env:TOKEN -ceq $env:LOCAL_PROD_TOKEN) {
+            Write-Host "CD: validación de producción correcta ✅ - listo para desplegar"
+          } else {
+            Write-Host "CD: validación fallida ❌"
+            Write-Error "PROD_TOKEN y LOCAL_PROD_TOKEN no coinciden."
+            exit 1
+          }
