@@ -4,3 +4,4 @@ Cambio para probar CI
 Comprobación positiva de CI
 Cambio para comprobar un token distinto
 CI en todos los eventos
+Prueba negativa en todos los eventos
