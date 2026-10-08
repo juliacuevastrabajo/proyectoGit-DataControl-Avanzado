@@ -26,11 +26,13 @@ jobs:
       - name: Registrar la rama en el README
         if: ${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'Merge pull request') }}
         env:
-          MERGE_MESSAGE: ${{ github.event.head_commit.message }}
           FALLBACK_BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          BRANCH=$(printf '%s\n' "$MERGE_MESSAGE" | sed -nE 's#^Merge pull request #[0-9]+ from [^/]+/(.+)$#\1#p' | head -n 1)
-          BRANCH=${BRANCH:-$FALLBACK_BRANCH}
+          SUBJECT=$(git log -1 --pretty=%s)
+          BRANCH=$(printf '%s\n' "$SUBJECT" | sed -E 's|^Merge pull request #[0-9]+ from [^/]+/||')
+          if [ -z "$BRANCH" ] || [ "$BRANCH" = "$SUBJECT" ]; then
+            BRANCH=$FALLBACK_BRANCH
+          fi
           LINE="- Añadida feature: $BRANCH"
           touch README.md
           if grep -Fxq -- "$LINE" README.md; then
